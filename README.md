@@ -62,7 +62,7 @@ POST /api/products
   "title": "Ноутбук",
   "category": "Электроника",
   "description": "Мощный игровой ноутбук",
-  "price": 99999.99
+  "price": 120000
 }
 ```
 
