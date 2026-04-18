@@ -1,11 +1,16 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
 const app = express();
 const port = 3000;
+
+// JWT настройка
+const JWT_SECRET = "access_secret";
+const ACCESS_EXPIRES_IN = "15m";
 
 // In-memory хранилища
 let users = [];
@@ -17,11 +22,18 @@ const swaggerOptions = {
     openapi: '3.0.0',
     info: {
       title: 'API Auth + Products',
-      version: '1.0.0',
-      description: 'Практическое задание — аутентификация и товары',
+      version: '2.0.0',
+      description: 'Практическое задание 7-8 — аутентификация (JWT) и товары',
     },
     servers: [{ url: `http://localhost:${port}`, description: 'Локальный сервер' }],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
         UserRegister: {
           type: 'object',
@@ -89,6 +101,24 @@ function findUserByEmail(email) {
 
 function findProductById(id) {
   return products.find(p => p.id === id) || null;
+}
+
+// JWT Middleware
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization || '';
+  const [scheme, token] = header.split(' ');
+
+  if (scheme !== 'Bearer' || !token) {
+    return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload; // { sub, email, iat, exp }
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
 }
 
 //  AUTH
@@ -175,7 +205,39 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ error: 'Неверный email или пароль' });
   }
 
-  res.status(200).json({ login: true, userId: user.id });
+  const accessToken = jwt.sign(
+    { sub: user.id, email: user.email },
+    JWT_SECRET,
+    { expiresIn: ACCESS_EXPIRES_IN }
+  );
+
+  res.status(200).json({ accessToken });
+});
+
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Получить текущего пользователя
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Объект текущего пользователя
+ *       401:
+ *         description: Не авторизован
+ *       404:
+ *         description: Пользователь не найден
+ */
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  const user = users.find(u => u.id === req.user.sub);
+  if (!user) {
+    return res.status(404).json({ error: 'Пользователь не найден' });
+  }
+
+  const { hashedPassword, ...userResponse } = user;
+  res.status(200).json(userResponse);
 });
 
 //  PRODUCTS
@@ -242,8 +304,10 @@ app.get('/api/products', (req, res) => {
  * @swagger
  * /api/products/{id}:
  *   get:
- *     summary: Получить товар по id
+ *     summary: Получить товар по id (требует авторизации)
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -253,10 +317,12 @@ app.get('/api/products', (req, res) => {
  *     responses:
  *       200:
  *         description: Товар найден
+ *       401:
+ *         description: Не авторизован
  *       404:
  *         description: Товар не найден
  */
-app.get('/api/products/:id', (req, res) => {
+app.get('/api/products/:id', authMiddleware, (req, res) => {
   const product = findProductById(req.params.id);
   if (!product) return res.status(404).json({ error: 'Товар не найден' });
   res.status(200).json(product);
@@ -266,8 +332,10 @@ app.get('/api/products/:id', (req, res) => {
  * @swagger
  * /api/products/{id}:
  *   put:
- *     summary: Обновить параметры товара
+ *     summary: Обновить параметры товара (требует авторизации)
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -283,10 +351,12 @@ app.get('/api/products/:id', (req, res) => {
  *     responses:
  *       200:
  *         description: Товар обновлён
+ *       401:
+ *         description: Не авторизован
  *       404:
  *         description: Товар не найден
  */
-app.put('/api/products/:id', (req, res) => {
+app.put('/api/products/:id', authMiddleware, (req, res) => {
   const product = findProductById(req.params.id);
   if (!product) return res.status(404).json({ error: 'Товар не найден' });
 
@@ -308,8 +378,10 @@ app.put('/api/products/:id', (req, res) => {
  * @swagger
  * /api/products/{id}:
  *   delete:
- *     summary: Удалить товар
+ *     summary: Удалить товар (требует авторизации)
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -319,10 +391,12 @@ app.put('/api/products/:id', (req, res) => {
  *     responses:
  *       200:
  *         description: Товар удалён
+ *       401:
+ *         description: Не авторизован
  *       404:
  *         description: Товар не найден
  */
-app.delete('/api/products/:id', (req, res) => {
+app.delete('/api/products/:id', authMiddleware, (req, res) => {
   const index = products.findIndex(p => p.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: 'Товар не найден' });
 
