@@ -9,12 +9,15 @@ const app = express();
 const port = 3000;
 
 // JWT настройка
-const JWT_SECRET = "access_secret";
+const ACCESS_SECRET = "access_secret";
+const REFRESH_SECRET = "refresh_secret";
 const ACCESS_EXPIRES_IN = "15m";
+const REFRESH_EXPIRES_IN = "7d";
 
 // In-memory хранилища
 let users = [];
 let products = [];
+const refreshTokens = new Set(); // хранилище актуальных refresh-токенов
 
 // Swagger
 const swaggerOptions = {
@@ -22,8 +25,8 @@ const swaggerOptions = {
     openapi: '3.0.0',
     info: {
       title: 'API Auth + Products',
-      version: '2.0.0',
-      description: 'Практическое задание 7-8 — аутентификация (JWT) и товары',
+      version: '3.0.0',
+      description: 'Практическое задание 7-9 — аутентификация (JWT + Refresh) и товары',
     },
     servers: [{ url: `http://localhost:${port}`, description: 'Локальный сервер' }],
     components: {
@@ -103,6 +106,22 @@ function findProductById(id) {
   return products.find(p => p.id === id) || null;
 }
 
+function generateAccessToken(user) {
+  return jwt.sign(
+    { sub: user.id, email: user.email },
+    ACCESS_SECRET,
+    { expiresIn: ACCESS_EXPIRES_IN }
+  );
+}
+
+function generateRefreshToken(user) {
+  return jwt.sign(
+    { sub: user.id, email: user.email },
+    REFRESH_SECRET,
+    { expiresIn: REFRESH_EXPIRES_IN }
+  );
+}
+
 // JWT Middleware
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
@@ -113,7 +132,7 @@ function authMiddleware(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, ACCESS_SECRET);
     req.user = payload; // { sub, email, iat, exp }
     next();
   } catch (err) {
@@ -180,7 +199,7 @@ app.post('/api/auth/register', async (req, res) => {
  *             $ref: '#/components/schemas/UserLogin'
  *     responses:
  *       200:
- *         description: Успешная авторизация
+ *         description: Возвращает accessToken и refreshToken
  *       400:
  *         description: Отсутствуют обязательные поля
  *       401:
@@ -205,13 +224,66 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ error: 'Неверный email или пароль' });
   }
 
-  const accessToken = jwt.sign(
-    { sub: user.id, email: user.email },
-    JWT_SECRET,
-    { expiresIn: ACCESS_EXPIRES_IN }
-  );
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+  refreshTokens.add(refreshToken);
 
-  res.status(200).json({ accessToken });
+  res.status(200).json({ accessToken, refreshToken });
+});
+
+/**
+ * @swagger
+ * /api/auth/refresh:
+ *   post:
+ *     summary: Обновить пару токенов
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Новая пара accessToken и refreshToken
+ *       400:
+ *         description: refreshToken не передан
+ *       401:
+ *         description: Невалидный или устаревший refresh-токен
+ */
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'refreshToken обязателен' });
+  }
+
+  if (!refreshTokens.has(refreshToken)) {
+    return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_SECRET);
+
+    const user = users.find(u => u.id === payload.sub);
+    if (!user) {
+      return res.status(401).json({ error: 'Пользователь не найден' });
+    }
+
+    // Ротация: удаляем старый, создаём новую пару
+    refreshTokens.delete(refreshToken);
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
+    refreshTokens.add(newRefreshToken);
+
+    res.status(200).json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
 });
 
 /**

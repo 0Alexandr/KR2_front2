@@ -1,4 +1,4 @@
-# Практические задания 7-8 — Auth + Products API
+# Практические задания 7-9 — Auth + Products API
 
 ## Установка и запуск
 
@@ -16,11 +16,12 @@ Swagger UI доступен по адресу `http://localhost:3000/api-docs`
 
 ### Auth
 
-| Метод | Маршрут            | Защита | Описание                          |
-|-------|--------------------|--------|-----------------------------------|
-| POST  | /api/auth/register | —      | Регистрация пользователя          |
-| POST  | /api/auth/login    | —      | Вход в систему, возвращает токен  |
-| GET   | /api/auth/me       | 🔒 JWT | Получить текущего пользователя    |
+| Метод | Маршрут              | Защита | Описание                              |
+|-------|----------------------|--------|---------------------------------------|
+| POST  | /api/auth/register   | —      | Регистрация пользователя              |
+| POST  | /api/auth/login      | —      | Вход в систему, возвращает пару токенов |
+| POST  | /api/auth/refresh    | —      | Обновить пару access + refresh токенов |
+| GET   | /api/auth/me         | 🔒 JWT | Получить текущего пользователя        |
 
 ### Products
 
@@ -36,14 +37,17 @@ Swagger UI доступен по адресу `http://localhost:3000/api-docs`
 
 ## Аутентификация (JWT)
 
-После входа через `/api/auth/login` сервер возвращает `accessToken`.  
-Для защищённых маршрутов необходимо передавать токен в заголовке:
+После входа через `/api/auth/login` сервер возвращает два токена — `accessToken` и `refreshToken`.  
+Для защищённых маршрутов необходимо передавать access-токен в заголовке:
 
 ```
-Authorization: Bearer <ваш_токен>
+Authorization: Bearer <accessToken>
 ```
 
-Токен действителен **15 минут**. После истечения нужно войти заново.
+- **accessToken** — действителен **15 минут**
+- **refreshToken** — действителен **7 дней**
+
+Когда access-токен истекает, отправь refresh-токен на `/api/auth/refresh` — сервер выдаст новую пару токенов. Старый refresh-токен при этом становится недействительным (ротация).
 
 ---
 
@@ -71,7 +75,23 @@ POST /api/auth/login
 Ответ:
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Обновить токены
+```json
+POST /api/auth/refresh
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+Ответ:
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
