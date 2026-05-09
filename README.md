@@ -139,3 +139,5 @@ Authorization: Bearer <accessToken>
 | category    | string | Категория           |
 | description | string | Описание            |
 | price       | number | Цена                |
+
+### Практики 10-11 сделаны на репозитории https://github.com/0Alexandr/PR10-11_front2
